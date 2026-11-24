@@ -1,0 +1,75 @@
+
+import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { AppModule } from '@/src/app.module';
+import * as dotenv from 'dotenv';
+import { Request, Response, NextFunction } from 'express';
+import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import { join } from 'path';
+
+dotenv.config();
+
+async function bootstrap() {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+    prefix: '/uploads/',
+  });
+
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.set('trust proxy', true);
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'validator.swagger.io'],
+          connectSrc: ["'self'"],
+        },
+      },
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
+
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+    console.log(`[HTTP] [${now}] ${req.method} ${req.originalUrl}`);
+    next();
+  });
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('ShopSphere API')
+    .setDescription('ShopSphere E-commerce Backend API Documentation')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+
+  SwaggerModule.setup('api/docs', app, document);
+
+  const cookieSecret =
+    process.env.COOKIE_SECRET || 'fallback-secret-dont-use-in-prod';
+
+  app.use(cookieParser(cookieSecret));
+
+  const allowedOrigins = process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',').map((origin) => origin.trim())
+    : [];
+
+  app.enableCors({
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    maxAge: 86400,
+  });
+
+  await app.listen(parseInt(process.env.PORT || '5001', 10));
+}
+
+bootstrap();
